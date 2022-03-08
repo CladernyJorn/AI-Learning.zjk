@@ -36,9 +36,6 @@ $$
 \frac{\partial x^TBx}{\partial x}=(B+B^T)x\\
 
 
-
-
-
 $$
 Hessian矩阵：
 $$
@@ -680,3 +677,143 @@ $$
 \Rightarrow\nabla_Wf=2W\cdot x\cdot x^T\\
 \Rightarrow\nabla_xf=2W^T\cdot q
 $$
+
+##### 传统神经网络：Fully Connected Net
+
+Fully Connected Net一半由多组Affine 和Relu以及中间的优化（包括批量归一化等操作）和最后的一个Affine及softmax组成。
+$$
+Fully-Connected-Net：(Affine+[batch-norm]+Relu+[..])\times L+Affine+softmax
+$$
+常用的神经元：
+
+- softmax-loss : $\quad Loss=\quad \dfrac{1}{N}\sum_{i=1}^N-log(\frac{e^{s_{y_i}}}{\sum_je^{s_j}})+reg\cdot\sum_kW_k^2$
+
+- Relu  :$ \quad H=max(0,X)$
+
+- Affine :$\quad H=WX+b$
+
+- Batch-Normalization (批量归一化BN)：消除线性层或者卷积层导致的特征尺度累计效应，同时也具有一定的正则化效果
+  $$
+  对输入的N张图片(每张有D维)，考虑第k列（即N张图片的同一维位置的值）的归一化：\\
+  \hat x_k=\frac{x_k-E(x_k)}{\sqrt{D(x_k)}}
+  $$
+  BN具体算法：
+  $$
+  选取一个mini-batch用于计算一个特征维度的均值和方差，取为B=\{x_1,x_2\dots\}\\
+  \mu_j\leftarrow\frac{1}{m}\sum_{i=1}^mx_{ij}\quad;\quad \sigma^2_j\leftarrow\frac{1}{m}\sum_{i=1}^m(x_{ij}-\mu_j)^2\\
+  对于处理全部的N个训练输入，对输入按列进行归一化：\hat x_{ij}=\frac{x_{ij}-\mu_j}{\sqrt{\sigma_j^2+\epsilon}}\\
+  最后再进行变换,需要进行变换参数\gamma 和\beta的学习(并非矩阵乘法，二个参数均为长度D的一维向量，即X的每一列拥有相同的值):\\
+  y_{ij}=\gamma_j \hat x_{ij}+\beta_j\equiv BN_{\gamma,\beta}(x_{ij})\\
+  另外，实现中还有一个细节：\\
+  训练时每次使用mini-batch的均值和方差，但是要在迭代中动态更新一个running-mean和running-var\\
+  在迭代结束时这两个值可以用来当作全体训练集的均值和方差，用于测试时使用，更新方程：(momentum一般取0.9)\\
+  RunningMean=momentum*RunningMean+(1-momentum)*SampleMean\\
+  RunningVar=momentum*RunningVar+(1-momentum)*SampleVar
+  $$
+  
+
+​	BN反向传播：
+$$
+\begin{align}
+&记上一层返回的\frac{\partial L}{\partial y}\equiv dout,大小为N\times D\\
+&根据计算图计算反向传播得出\frac{\partial L}{\partial \gamma},\frac{\partial L}{\partial \beta},\frac{\partial L}{\partial x}:\\
+&\quad \frac{\partial L}{\partial \gamma}=\sum_{i=1}^n(\frac{\partial L}{\partial y}\cdot \hat x)_i,即点乘后按列相加\\
+&\quad \frac{\partial L}{\partial \beta}=\sum_{i=1}^n(\frac{\partial L}{\partial y})_i,即dout按列相加\\
+&\quad \frac{\partial L}{\partial x}=\frac{\partial L}{\partial x_1}+\frac{\partial L}{\partial x_2}\\
+&其中：\\
+&\qquad\frac{\partial L}{\partial x_1}=\frac{1}{N}
+\begin{bmatrix}
+1&\cdots&1\\
+\vdots&\ddots&\vdots\\
+1&\cdots&1\\
+\end{bmatrix}^{N\times D}\frac{\partial L}{\partial \mu}\\
+&\qquad\frac{\partial L}{\partial x_2}=
+\frac{\partial L}{\partial y}\frac{\gamma}{\sqrt{\sigma^2+\epsilon}}+
+\frac{2}{N}
+\begin{bmatrix}
+1&\cdots&1\\
+\vdots&\ddots&\vdots\\
+1&\cdots&1\\
+\end{bmatrix}^{N\times D}\frac{\partial L}{\partial \sigma^2}(x-\mu)\\
+&\qquad\qquad\frac{\partial L}{\partial \mu}=
+-\frac{\gamma}{\sqrt{\sigma^2+\epsilon}}\sum_{i=1}^N\frac{\partial L}{\partial y}-\frac{2}{N}\frac{\partial L}{\partial \sigma^2}\sum_{i=1}^N(x-\mu)\\
+&\qquad\qquad\frac{\partial L}{\partial \sigma^2}=
+-\frac{1}{2}\sum_{i=1}^N\frac{\partial L}{\partial y}\frac{\gamma(x-\mu)}{(\sigma^2+\epsilon)^\frac{3}{2}}
+\end{align}
+$$
+
+- Layer Normalization：另一种归一化，对输入数据点的特征为轴计算均值和方差进行归一化，BN是纵向的归一化，而LN是横向的归一化，总体上效果不如BN但是更省时，算法上只需要将BN的数据转置后计算。（另外不再设置running-mean和var了，训练和测试的归一化方式完全相同）
+
+- Dropout：防止过拟合采取的另一种手段，将一层中的某一些神经元置为零（实际上是每个神经元以概率p伯努利分布失活，即直接让输出的特征中部分变为0）。在测试时前向计算时不进行Dropout，因为本质上不需要在这时防止过拟合。
+
+​		网络中正向传播用于顺着网络计算最终的得分矩阵，反向传播用于倒推每个Affine节点系数矩阵的偏导数，然后用梯度下降一次次迭代训练这些系数矩阵，降低loss，提高神经网络分类能力
+
+##### 四种梯度下降方法算法
+
+1.SGD随机梯度下降：$W\leftarrow W-\eta \frac{\partial L}{\partial W}$,对于呈延伸状函数搜索效率很低
+
+2.SGD-Momentum: 通过动量（梯度的积累）有效地处理局部极值和鞍点，同时也有效地降低了mini-batch造成的噪声随机性，路径更加稳定
+$$
+\begin{align}
+&v\leftarrow \alpha v-\eta \frac{\partial L}{\partial W}\\
+&W\leftarrow W+v
+\end{align}
+$$
+3.RMSProp(Ada优化)：具有记忆性，在梯度大的方向学习率降低，梯度小的方向学习率提高
+$$
+\begin{align}
+&R\leftarrow \rho R+(1-\rho)\frac{\partial L}{\partial W}\odot\frac{\partial L}{\partial W} ,\quad R与W形状相同\\
+&W\leftarrow W-\eta\frac{1}{\epsilon+\sqrt{R}}\odot\frac{\partial L}{\partial W},\quad \sqrt{R}指对每个元素开根,\epsilon 是个小量，避免分母为0
+\end{align}
+$$
+4.Adam
+
+- s:历史梯度指数衰减平均，代表了动量的积累$s\leftarrow\rho_1 s+(1-\rho_1)\frac{\partial L}{\partial W}$
+- r：历史梯度平方的指数衰减平均，$r\leftarrow \rho_2 r+(1-\rho)\frac{\partial L}{\partial W}\odot\frac{\partial L}{\partial W}$
+- 修正偏差，防止训练初期s和r太小（$\rho_1和\rho_2一般都比较接近于1$): $ \hat s\leftarrow\dfrac{s}{1-\rho_1^t};\hat r\leftarrow\dfrac{r}{1-\rho_2^t} $ ，t表示当前迭代次数
+
+算法：
+$$
+s\leftarrow	\rho_1 s+(1-\rho_1)\frac{\partial L}{\partial W}\\
+r\leftarrow	 \rho_2 r+(1-\rho_2)\frac{\partial L}{\partial W}\odot\frac{\partial L}{\partial W}\\
+W\leftarrow W-\eta\frac{s/(1-\rho_1^t)}{\epsilon+\sqrt{r/(1-\rho_2^t)}}
+$$
+
+#### 4.卷积神经网络
+
+**重要声明：一般神经网络里所谓“卷积”就是对应位置加权求和，算法中不对核进行翻转！！！**一下公式里的“$\circ$”卷积全部使用点乘实现，可以避免很多繁琐的操作。
+
+**卷积层-Conv**：使用卷积加偏差替代神经网络中节点的输出算法，对于彩色图像（一般称“深度”为3，rgb），卷积核也应是三维的，每个卷积层中有多个卷积核，浅层的卷积核训练后能够展现图片的简单细节，而更深层的卷积核则体现更复杂的细节。另外，默认图像边界填充0像素，保证结果的形状不会变小。
+$$
+H_{i,j}=I\circ g+b\\
+例如：对32\times32\times3的图片，某一层使用10个5\times5(暗指5\times5\times3)卷积核\\输出的结果为32\times32\times10,总共(5\times5\times3+1)\times 10=760个参数
+$$
+卷积层的求导：具体推到可以手撕，这里给出结论
+$$
+设卷积层Y=X\circ W+b\quad(X为输入，Y为输出，W为核，b为偏差)有：\\
+\frac{\partial L}{\partial X}=\frac{\partial L}{\partial Y}\circ W\quad ,其中\frac{\partial L}{\partial Y}需要补0，每两个元素以及外侧需要插入stride-1个0，同时最外侧额外补全pad个0\\
+\frac{\partial L}{\partial W}=\frac{\partial L}{\partial Y}\circ X(如果使用的是卷积而不是点乘，则需要额外将结果中心对称一下)\\
+\frac{\partial L}{\partial W}=\sum_{i,j}(\frac{\partial L}{\partial Y})_{i,j}
+$$
+需要注意，对dout行间插入0的部分没有库函数，需要自己写循环插入（cs231中的数值验证只对stride=1有效，因此大部分只用numpy实现的conv-backward都只能在stride=1下运行）。
+
+针对卷积层，batchnormalization的均值和方差取为这个通道的全部像素（即最后的$\gamma、\beta$都是C维向量（C是卷积层的核数量）
+
+同时，为了减少计算，对于卷积网络也有batchnorm的变形（与layernorm不同），称为**Group Norm**，可以理解为在layer Norm的基础上，输入维度为（N,C,H,W），对C进行分组，即为（N,G,C//G,H,W），对N个通道G个组进行归一化，输出维度为（N,G,C//G,H,W），再还原输出维度为（N,C,H,W）
+
+**池化层**：一类特殊的卷积核，对输入的平面尺寸进行压缩（深度方向不变）即将采样，这里的卷积计算不填充0，并且使用的步长不是1，而是使进行了卷积计算的区域不发生重叠的步长（就是用卷积核均匀覆盖整张图片，无重叠部分）。
+
+( 例子——常用的Max Pooling：取2*2大小的像素块，将其用4个像素中最大的那个代替，最终图像被压缩为一半。最大值池化能够体现神经元在某一区域的激发程度，更好地描述特征。 )
+$$
+ConvNets：[(Conv+Relu)\times N+Pool]\times M+(FC+Relu)\times K+softmax
+$$
+
+#### 5.Pytorch网络构建
+
+使用pytorch构建cnn的方法：
+
+1. 定义网络类（nn.Module的子类，如"$class TwoLayerFC(nn.Module)$")
+   1. _init_函数，需要先用super（），其中设置网络的结构和初始化方法（内封初始化）
+   2. 定义forward，由输入x计算scores
+2. 编写Train函数，定义使用的优化算法，进行前向和后向计算
+3. 倒入数据集，数据预处理，调用方法，输出结果
